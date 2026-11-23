@@ -73,14 +73,19 @@ if __name__ == '__main__':
     scheduler_1stage = create_scheduler(optimizer_1stage, num_epochs = cfg.SOLVER.STAGE1.MAX_EPOCHS, lr_min = cfg.SOLVER.STAGE1.LR_MIN, \
                         warmup_lr_init = cfg.SOLVER.STAGE1.WARMUP_LR_INIT, warmup_t = cfg.SOLVER.STAGE1.WARMUP_EPOCHS, noise_range = None)
 
-    do_train_stage1(
-        cfg,
-        model,
-        train_loader_stage1,
-        optimizer_1stage,
-        scheduler_1stage,
-        args.local_rank
-    )
+    if cfg.SOLVER.STAGE2.RESUME_WEIGHT:
+        logger.info("Resuming Stage 2 from {} (Stage 1 skipped)".format(
+            cfg.SOLVER.STAGE2.RESUME_WEIGHT))
+        model.load_param(cfg.SOLVER.STAGE2.RESUME_WEIGHT)
+    else:
+        do_train_stage1(
+            cfg,
+            model,
+            train_loader_stage1,
+            optimizer_1stage,
+            scheduler_1stage,
+            args.local_rank
+        )
 
     optimizer_2stage, optimizer_center_2stage = make_optimizer_2stage(cfg, model, center_criterion)
     scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,

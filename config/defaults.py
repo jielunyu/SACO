@@ -223,6 +223,10 @@ _C.SOLVER.STAGE2.CHECKPOINT_PERIOD = 10
 _C.SOLVER.STAGE2.LOG_PERIOD = 100
 # epoch number of validation
 _C.SOLVER.STAGE2.EVAL_PERIOD = 10
+# Resume Stage 2 from this checkpoint (Stage 1 is skipped). '' = train from scratch.
+_C.SOLVER.STAGE2.RESUME_WEIGHT = ''
+# First epoch of a resumed Stage-2 run (1 = normal start from epoch 1).
+_C.SOLVER.STAGE2.START_EPOCH = 1
 # Number of images per batch
 # This is global, so if we have 8 GPUs and IMS_PER_BATCH = 128, each GPU will
 # contain 16 images per batch

@@ -108,8 +108,8 @@ class build_transformer(nn.Module):
         # They are filled once by ``cache_text_features`` (called from the
         # Stage-2 processor) and never optimised: this keeps the identity
         # anchors stationary while the image encoder adapts.
-        self.register_buffer("text_features_real", torch.zeros(0))
-        self.register_buffer("text_features_cf", torch.zeros(0))
+        self.register_buffer("text_features_real", torch.zeros(num_classes, self.in_planes_proj))
+        self.register_buffer("text_features_cf", torch.zeros(num_classes, self.in_planes_proj))
         self._text_features_ready = False
 
     def encode_text(self, label, is_counterfactual=False):

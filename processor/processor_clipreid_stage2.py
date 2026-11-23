@@ -83,7 +83,15 @@ def do_train_stage2(cfg,
                 text_features.append(text_feature.cpu())
             text_features = torch.cat(text_features, 0).cuda()
 
-    for epoch in range(1, epochs + 1):
+    start_epoch = int(getattr(cfg.SOLVER.STAGE2, 'START_EPOCH', 1))
+    if start_epoch > 1:
+        # advance the LR schedule as if the skipped epochs had run
+        for _ in range(start_epoch - 1):
+            scheduler.step()
+        logger.info("Resuming Stage 2 at epoch {} (scheduler advanced {} steps)".format(
+            start_epoch, start_epoch - 1))
+
+    for epoch in range(start_epoch, epochs + 1):
         start_time = time.time()
         loss_meter.reset()
         acc_meter.reset()

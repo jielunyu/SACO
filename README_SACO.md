@@ -79,6 +79,17 @@ Edit `DATASETS.ROOT_DIR` / `OUTPUT_DIR` / `TEST.WEIGHT` in the config for your
 environment. For a baseline run, add `MODEL.CAUSAL_STATE False` to the command
 line.
 
+### Resume Stage 2
+
+If Stage 2 is interrupted, resume from the latest checkpoint. Stage 1 is skipped
+and the learning-rate schedule is advanced to the matching epoch:
+
+```bash
+python train_clipreid.py --config_file configs/person/vit_clipreid_causal_market.yml \
+    SOLVER.STAGE2.RESUME_WEIGHT output/causal_market_walk/ViT-B-16_10.pth \
+    SOLVER.STAGE2.START_EPOCH 11
+```
+
 ## Environment
 
 Python 3.8, PyTorch 1.10, `yacs`, `timm`, `ftfy`, `regex`, `tqdm`
