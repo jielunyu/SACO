@@ -101,8 +101,13 @@ class build_transformer(nn.Module):
             print('camera number is : {}'.format(view_num))
 
         dataset_name = cfg.DATASETS.NAMES
-        self.prompt_learner = PromptLearner(num_classes, dataset_name, clip_model.dtype, clip_model.token_embedding, cfg)
+        self.prompt_learner = PromptLearner(num_classes, dataset_name, clip_model.dtype, clip_model.token_embedding, cfg, clip_model)
         self.text_encoder = TextEncoder(clip_model)
+
+        # Triple semantic addressing (identity / domain / state)
+        self.use_triple = bool(getattr(cfg.MODEL, 'TRIPLE_ADDRESSING', False))
+        self.eval_purify = bool(getattr(cfg.MODEL, 'EVAL_PURIFY', True))
+        self.probe_temp = float(getattr(cfg.MODEL, 'PROBE_TEMP', 0.05))
 
         # Frozen text anchors used by the Stage-2 image-text alignment.
         # They are filled once by ``cache_text_features`` (called from the
@@ -146,8 +151,48 @@ class build_transformer(nn.Module):
         if was_training:
             self.train()
 
+    def _triple_address(self, image_features, image_features_proj, is_riding=None):
+        """Decompose the visual tokens into identity / domain / state parts.
+
+        Text probes live in CLIP's joint 512-d space, which is exactly the space
+        of ``image_features_proj`` (the projected patch tokens).  Attention is
+        therefore computed between the normalised projected tokens and the
+        normalised probes, and the resulting weights are also used to pool the
+        768-d vision tokens so that all three components live in the same space
+        as the CLS identity feature.
+        """
+        patch_proj = image_features_proj[:, 1:, :]
+        patch_vis = image_features[:, 1:, :]
+
+        patch_proj_n = nn.functional.normalize(patch_proj.float(), dim=-1)
+        p_domain, p_state = self.prompt_learner.get_probes(is_riding)
+
+        comps = []
+        for probe in (p_domain, p_state):
+            probe_n = nn.functional.normalize(probe.float(), dim=-1)          # [1, 512]
+            probe_n = probe_n.expand(patch_proj_n.shape[0], -1).unsqueeze(-1)  # [B, 512, 1]
+            attn = torch.softmax(
+                torch.bmm(patch_proj_n, probe_n).squeeze(-1) / self.probe_temp,
+                dim=1)                                                       # [B, N]
+            attn = attn.to(patch_vis.dtype)
+            v_vis = torch.bmm(attn.unsqueeze(1), patch_vis).squeeze(1)       # [B, 768]
+            v_proj = torch.bmm(attn.unsqueeze(1), patch_proj).squeeze(1)     # [B, 512]
+            comps.append((v_vis, v_proj))
+
+        v_id = image_features[:, 0]                                          # [B, 768] CLS
+        return (v_id,
+                comps[0][0], comps[1][0],                                    # domain/state, 768-d
+                comps[0][1], comps[1][1])                                    # domain/state, 512-d
+
+    @staticmethod
+    def _remove_component(v, d, eps=1e-6):
+        """Project the direction ``d`` out of every row of ``v``."""
+        v32, d32 = v.float(), d.float()
+        coef = (v32 * d32).sum(1, keepdim=True) / (d32 * d32).sum(1, keepdim=True).clamp_min(eps)
+        return (v32 - coef * d32).to(v.dtype)
+
     def forward(self, x = None, label=None, get_image = False, get_text = False, cam_label= None, view_label=None,
-                is_counterfactual=False):
+                is_counterfactual=False, is_riding=None):
         if get_text == True:
             return self.encode_text(label, is_counterfactual=is_counterfactual)
 
@@ -199,9 +244,27 @@ class build_transformer(nn.Module):
             else:
                 logits_cf = None
 
-            return [cls_score, cls_score_proj], [img_feature_last, img_feature, img_feature_proj], img_feature_proj, logits_real, logits_cf
+            # Triple addressing: (identity, domain, state) components used by
+            # the orthogonal loss.  Only the ViT token layout is supported.
+            orth = None
+            if self.use_triple and self.model_name == 'ViT-B-16':
+                orth = self._triple_address(image_features, image_features_proj, is_riding)
+
+            return [cls_score, cls_score_proj], [img_feature_last, img_feature, img_feature_proj], img_feature_proj, logits_real, logits_cf, orth
 
         else:
+            if self.use_triple and self.eval_purify and self.model_name == 'ViT-B-16':
+                # Inference-time geometric removal of the domain and state
+                # directions from the retrieval descriptor.
+                _, v_domain, v_state, v_domain_proj, v_state_proj = self._triple_address(
+                    image_features, image_features_proj, is_riding)
+                img_feature = self._remove_component(img_feature, v_domain)
+                img_feature = self._remove_component(img_feature, v_state)
+                img_feature_proj = self._remove_component(img_feature_proj, v_domain_proj)
+                img_feature_proj = self._remove_component(img_feature_proj, v_state_proj)
+                feat = self.bottleneck(img_feature)
+                feat_proj = self.bottleneck_proj(img_feature_proj)
+
             if self.neck_feat == 'after':
                 # print("Test with feature after BN")
                 return torch.cat([feat, feat_proj], dim=1)
@@ -211,8 +274,18 @@ class build_transformer(nn.Module):
 
     def load_param(self, trained_path):
         param_dict = torch.load(trained_path)
+        own = self.state_dict()
+        skipped = []
         for i in param_dict:
-            self.state_dict()[i.replace('module.', '')].copy_(param_dict[i])
+            key = i.replace('module.', '')
+            # buffers such as the cached text anchors are rebuilt at Stage-2
+            # start, and probe buffers did not exist in older checkpoints
+            if key not in own or own[key].shape != param_dict[i].shape:
+                skipped.append(key)
+                continue
+            own[key].copy_(param_dict[i])
+        if skipped:
+            print('Skipped {} non-matching key(s): {}'.format(len(skipped), skipped[:8]))
         print('Loading pretrained model from {}'.format(trained_path))
 
     def load_param_finetune(self, model_path):
@@ -245,7 +318,7 @@ def load_clip_to_cpu(backbone_name, h_resolution, w_resolution, vision_stride_si
     return model
 
 class PromptLearner(nn.Module):
-    def __init__(self, num_class, dataset_name, dtype, token_embedding, cfg=None):
+    def __init__(self, num_class, dataset_name, dtype, token_embedding, cfg=None, clip_model=None):
         super().__init__()
         if dataset_name == "VehicleID" or dataset_name == "veri":
             ctx_init = "A photo of a X X X X vehicle."
@@ -323,6 +396,30 @@ class PromptLearner(nn.Module):
         self.register_buffer("state_walk", state_embs['walk'])
         self.register_buffer("state_ride", state_embs['ride'])
 
+        # ------------------------------------------------------------------
+        # Fixed semantic probes for triple addressing: one domain probe and two
+        # motion-state probes, encoded once by the frozen CLIP text encoder and
+        # kept as buffers (they are anchors, never optimised).
+        # ------------------------------------------------------------------
+        self.use_triple = bool(cfg is not None and cfg.MODEL.TRIPLE_ADDRESSING)
+        if cfg is not None:
+            probe_texts = (cfg.MODEL.DOMAIN_PROBE_TEXT,
+                           cfg.MODEL.STATE_WALK_PROBE_TEXT,
+                           cfg.MODEL.STATE_RIDE_PROBE_TEXT)
+        else:
+            probe_texts = ('surveillance camera environment, background',
+                           'a person walking',
+                           'a person riding a bicycle')
+        if clip_model is not None:
+            with torch.no_grad():
+                probes = [clip_model.encode_text(clip.tokenize(t).cuda()).type(dtype).detach().reshape(1, -1)
+                          for t in probe_texts]
+        else:
+            probes = [torch.zeros(1, ctx_dim, dtype=dtype) for _ in probe_texts]
+        self.register_buffer("domain_probe", probes[0])
+        self.register_buffer("state_walk_probe", probes[1])
+        self.register_buffer("state_ride_probe", probes[2])
+
         if use_state:
             # Prompt layout:
             #   [SOS] "A photo of a" | ID ctx (4) | "person" | STATE (n) | "." [EOS] pad ...
@@ -347,6 +444,21 @@ class PromptLearner(nn.Module):
             self.eot_idx = int(tokenized_prompts.argmax(dim=-1)[0].item())
 
         assert self.tokenized_prompts.shape[1] == self.context_length
+
+    def get_probes(self, is_riding=None):
+        """Return the fixed (domain, state) probes for triple addressing.
+
+        ``is_riding=None`` follows the source domain's native state, which is
+        the right choice for single-domain training/inference.  Pass an explicit
+        flag for joint walk/ride batches.
+        """
+        if not hasattr(self, 'domain_probe'):
+            raise RuntimeError("PromptLearner was built without probes")
+        if is_riding is None:
+            state = self.state_walk_probe if self.native_state == 'walk' else self.state_ride_probe
+        else:
+            state = self.state_ride_probe if is_riding else self.state_walk_probe
+        return self.domain_probe, state
 
     def forward(self, label, is_counterfactual=False):
         cls_ctx = self.cls_ctx[label]

@@ -57,6 +57,23 @@ _C.MODEL.I2T_CF_LOSS_WEIGHT = 1.0
 _C.MODEL.STATE_WALK_TEXT = 'walking on foot'
 _C.MODEL.STATE_RIDE_TEXT = 'riding a bicycle'
 
+# -----------------------------------------------------------------------------
+# Triple semantic addressing (identity / domain / state decomposition)
+# -----------------------------------------------------------------------------
+# Fixed CLIP text probes localise domain and motion-state evidence in the patch
+# tokens; an orthogonal loss keeps the identity feature away from both, and at
+# inference the same directions are projected out of the retrieval descriptor.
+_C.MODEL.TRIPLE_ADDRESSING = False
+_C.MODEL.ORTH_LOSS_WEIGHT = 1.0
+_C.MODEL.ORTH_MUTUAL_WEIGHT = 0.5
+# softmax temperature of the patch-vs-probe attention
+_C.MODEL.PROBE_TEMP = 0.05
+# project the domain/state components out of the features at inference
+_C.MODEL.EVAL_PURIFY = True
+_C.MODEL.DOMAIN_PROBE_TEXT = 'surveillance camera environment, background'
+_C.MODEL.STATE_WALK_PROBE_TEXT = 'a person walking'
+_C.MODEL.STATE_RIDE_PROBE_TEXT = 'a person riding a bicycle'
+
 _C.MODEL.METRIC_LOSS_TYPE = 'triplet'
 # If train with multi-gpu ddp mode, options: 'True', 'False'
 _C.MODEL.DIST_TRAIN = False

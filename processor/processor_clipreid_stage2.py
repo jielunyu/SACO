@@ -114,13 +114,13 @@ def do_train_stage2(cfg,
             else: 
                 target_view = None
             with amp.autocast(enabled=True):
-                score, feat, image_features, logits_real, logits_cf = model(
+                score, feat, image_features, logits_real, logits_cf, orth = model(
                     x = img, label = target, cam_label=target_cam, view_label=target_view)
                 if logits_real is None:
                     logits = image_features @ text_features.t()
                 else:
                     logits = logits_real
-                loss = loss_fn(score, feat, target, target_cam, logits, logits_cf)
+                loss = loss_fn(score, feat, target, target_cam, logits, logits_cf, orth)
 
             scaler.scale(loss).backward()
 
@@ -145,11 +145,11 @@ def do_train_stage2(cfg,
                     val = parts.get(key, None)
                     return 'n/a' if val is None else '{:.3f}'.format(val)
                 logger.info("Epoch[{}] Iteration[{}/{}] Loss: {:.3f}, Acc: {:.3f}, "
-                            "L_id: {}, L_tri: {}, L_i2t: {}, L_i2t_cf: {}, Base Lr: {:.2e}"
+                            "L_id: {}, L_tri: {}, L_i2t: {}, L_i2t_cf: {}, L_orth: {}, Base Lr: {:.2e}"
                             .format(epoch, (n_iter + 1), len(train_loader_stage2),
                                     loss_meter.avg, acc_meter.avg,
                                     _fmt('id'), _fmt('triplet'), _fmt('i2t'), _fmt('i2t_cf'),
-                                    scheduler.get_lr()[0]))
+                                    _fmt('orth'), scheduler.get_lr()[0]))
 
         end_time = time.time()
         time_per_batch = (end_time - start_time) / (n_iter + 1)

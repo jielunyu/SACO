@@ -71,7 +71,7 @@ TEST:
   EVAL: True
   IMS_PER_BATCH: 64
   RE_RANKING: False
-  WEIGHT: '/mnt/sda/yjl/ReID/CLIP-ReID/SACO/output2/causal_market_walk/ViT-B-16_60.pth'
+  WEIGHT: '/mnt/sda/yjl/ReID/CLIP-ReID/SACO/output2/causal_market_walk/ViT-B-16_45.pth'
   NECK_FEAT: 'before'
   FEAT_NORM: 'yes'
 
@@ -80,5 +80,10 @@ DATASETS:
   ROOT_DIR: '/mnt/sda/yjl/ReID/data'
 OUTPUT_DIR: '/mnt/sda/yjl/ReID/CLIP-ReID/SACO/output2/causal_market_walk'
 
+
+#   NAMES: ('dukemtmc')
+#   ROOT_DIR: ('/mnt/sda/yjl/ReID/data/')
+# OUTPUT_DIR: '/mnt/sda/yjl/ReID/CLIP-ReID/SACO/output2/causal_market_walk'
+
 # CUDA_VISIBLE_DEVICES=0 python train_clipreid.py --config_file configs/person/vit_clipreid_causal_market.yml
-# CUDA_VISIBLE_DEVICES=0 python test_clipreid.py --config_file configs/person/vit_clipreid_causal_market.yml
+# CUDA_VISIBLE_DEVICES=1 python test_clipreid.py --config_file configs/person/vit_clipreid_causal_market.yml
