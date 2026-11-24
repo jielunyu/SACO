@@ -38,25 +38,26 @@ SACO treats the state as a causal factor and intervenes on it at Stage 2:
    description *even when the stated motion state is wrong*, i.e. it removes the
    state direction from the retrieval descriptor.
 
-## Triple semantic addressing (optional, `MODEL.TRIPLE_ADDRESSING`)
+## Asymmetric decoupling (optional, `MODEL.ASYMMETRIC_DECOUPLING`)
 
-When enabled, the prompt learner also yields three **fixed** CLIP text probes
-(domain, walking, riding). Patch tokens attend to them in CLIP's joint 512-d
-space, and the same attention weights pool the 768-d vision tokens, giving
-`v_domain`, `v_state` and the CLS identity feature in one space.
+A single **fixed** CLIP text probe describes the domain
+(`surveillance camera environment, background`). Patch tokens attend to it in
+CLIP's joint 512-d space, and the same attention weights pool the 768-d vision
+tokens, giving `v_domain` in the same space as the CLS identity feature.
 
-Training adds a **soft** orthogonal regulariser:
+Training adds a **soft** domain orthogonal regulariser:
 
 ```
-L_orth = cos²(v_id, v_domain) + cos²(v_id, v_state)   (+ w·cos²(domain, state))
+L_orth = cos²(v_id, v_domain)
 ```
 
-The decoupling is learned through gradients only. The retrieval descriptor is
-**not** modified geometrically at inference: hard subtraction of the
-domain/state directions (`MODEL.EVAL_PURIFY`, off by default) also removes the
-structural prior used to localise people and was measured to hurt cross-domain
-mAP (Market→Duke: 50.6 → 50.1). `MODEL.ORTH_LOSS_WEIGHT=0.5` keeps the term a
-regulariser rather than a dominant objective.
+The motion state is deliberately *not* addressed and never removed
+geometrically: it is debiased only by the counterfactual text alignment
+(`L_i2t_cf`). The retrieval descriptor is not modified at inference;
+`MODEL.EVAL_PURIFY` is an ablation-only switch and defaults to `False` (hard
+removal also removes the structural prior used to localise people and measured
+Market→Duke mAP 50.7 → 50.1). `MODEL.ORTH_LOSS_WEIGHT=0.5` keeps the term a
+regulariser.
 
 ## Key files
 

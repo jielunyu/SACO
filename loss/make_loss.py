@@ -29,17 +29,18 @@ def make_loss(cfg, num_classes):    # modified by gu
         xent = CrossEntropyLabelSmooth(num_classes=num_classes)
         print("label smooth on, numclasses:", num_classes)
 
-    def _cos2_orth_losses(orth):
-        """Squared cosine between the identity feature and the domain/state
-        components (all in the same 768-d vision space)."""
-        v_id, v_domain, v_state = orth[0], orth[1], orth[2]
+    def _domain_orth_loss(orth):
+        """Squared cosine between the identity feature and the domain component
+        (both in the same 768-d vision space).  No state term: the motion state
+        is debiased by the counterfactual text alignment instead."""
+        v_id, v_domain = orth[0], orth[1]
 
         def _cos2(a, b):
             a = F.normalize(a.float(), dim=1)
             b = F.normalize(b.float(), dim=1)
             return (a * b).sum(dim=1).pow(2).mean()
 
-        return _cos2(v_id, v_domain), _cos2(v_id, v_state), _cos2(v_domain, v_state)
+        return _cos2(v_id, v_domain)
 
     if sampler == 'softmax':
         def loss_func(score, feat, target):
@@ -77,22 +78,18 @@ def make_loss(cfg, num_classes):    # modified by gu
                         I2T_CF_LOSS = xent(i2tscore_cf, target)
                         loss = cfg.MODEL.I2T_CF_LOSS_WEIGHT * I2T_CF_LOSS + loss
 
-                    ORTH_D = ORTH_S = ORTH_M = None
+                    ORTH_LOSS = None
                     if orth is not None:
-                        ORTH_D, ORTH_S, ORTH_M = _cos2_orth_losses(orth)
-                        orth_total = ORTH_D + ORTH_S + cfg.MODEL.ORTH_MUTUAL_WEIGHT * ORTH_M
-                        loss = cfg.MODEL.ORTH_LOSS_WEIGHT * orth_total + loss
+                        ORTH_LOSS = _domain_orth_loss(orth)
+                        loss = cfg.MODEL.ORTH_LOSS_WEIGHT * ORTH_LOSS + loss
 
                     loss_func.last_losses = {
                         'id': float(ID_LOSS.detach()),
                         'triplet': float(TRI_LOSS.detach()),
                         'i2t': None if I2TLOSS is None else float(I2TLOSS.detach()),
                         'i2t_cf': None if I2T_CF_LOSS is None else float(I2T_CF_LOSS.detach()),
-                        'orth': None if ORTH_D is None else float(
-                            (ORTH_D + ORTH_S + cfg.MODEL.ORTH_MUTUAL_WEIGHT * ORTH_M).detach()),
-                        'orth_domain': None if ORTH_D is None else float(ORTH_D.detach()),
-                        'orth_state': None if ORTH_S is None else float(ORTH_S.detach()),
-                        'orth_mutual': None if ORTH_M is None else float(ORTH_M.detach()),
+                        'orth': None if ORTH_LOSS is None else float(ORTH_LOSS.detach()),
+                        'orth_domain': None if ORTH_LOSS is None else float(ORTH_LOSS.detach()),
                     }
 
                     return loss
@@ -121,22 +118,18 @@ def make_loss(cfg, num_classes):    # modified by gu
                         I2T_CF_LOSS = F.cross_entropy(i2tscore_cf, target)
                         loss = cfg.MODEL.I2T_CF_LOSS_WEIGHT * I2T_CF_LOSS + loss
 
-                    ORTH_D = ORTH_S = ORTH_M = None
+                    ORTH_LOSS = None
                     if orth is not None:
-                        ORTH_D, ORTH_S, ORTH_M = _cos2_orth_losses(orth)
-                        orth_total = ORTH_D + ORTH_S + cfg.MODEL.ORTH_MUTUAL_WEIGHT * ORTH_M
-                        loss = cfg.MODEL.ORTH_LOSS_WEIGHT * orth_total + loss
+                        ORTH_LOSS = _domain_orth_loss(orth)
+                        loss = cfg.MODEL.ORTH_LOSS_WEIGHT * ORTH_LOSS + loss
 
                     loss_func.last_losses = {
                         'id': float(ID_LOSS.detach()),
                         'triplet': float(TRI_LOSS.detach()),
                         'i2t': None if I2TLOSS is None else float(I2TLOSS.detach()),
                         'i2t_cf': None if I2T_CF_LOSS is None else float(I2T_CF_LOSS.detach()),
-                        'orth': None if ORTH_D is None else float(
-                            (ORTH_D + ORTH_S + cfg.MODEL.ORTH_MUTUAL_WEIGHT * ORTH_M).detach()),
-                        'orth_domain': None if ORTH_D is None else float(ORTH_D.detach()),
-                        'orth_state': None if ORTH_S is None else float(ORTH_S.detach()),
-                        'orth_mutual': None if ORTH_M is None else float(ORTH_M.detach()),
+                        'orth': None if ORTH_LOSS is None else float(ORTH_LOSS.detach()),
+                        'orth_domain': None if ORTH_LOSS is None else float(ORTH_LOSS.detach()),
                     }
 
                     return loss

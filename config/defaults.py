@@ -58,20 +58,23 @@ _C.MODEL.STATE_WALK_TEXT = 'walking on foot'
 _C.MODEL.STATE_RIDE_TEXT = 'riding a bicycle'
 
 # -----------------------------------------------------------------------------
-# Triple semantic addressing (identity / domain / state decomposition)
+# Asymmetric decoupling (identity vs. domain)
 # -----------------------------------------------------------------------------
-# Fixed CLIP text probes localise domain and motion-state evidence in the patch
-# tokens; an orthogonal loss keeps the identity feature away from both, and at
-# inference the same directions are projected out of the retrieval descriptor.
+# Only the *domain* direction is addressed and softly orthogonalised.  The
+# motion state is handled exclusively by the counterfactual text alignment:
+# there is no state probe and no state orthogonal term.
+_C.MODEL.ASYMMETRIC_DECOUPLING = False
+# Deprecated alias kept so old configs still load (maps to asymmetric decoupling)
 _C.MODEL.TRIPLE_ADDRESSING = False
 _C.MODEL.ORTH_LOSS_WEIGHT = 0.5
-# optional domain<->state decoupling term; disabled by default (regulariser only)
+# deprecated (no state orthogonality any more), kept for config compatibility
 _C.MODEL.ORTH_MUTUAL_WEIGHT = 0.0
 # softmax temperature of the patch-vs-probe attention
-_C.MODEL.PROBE_TEMP = 0.05
+_C.MODEL.PROBE_TEMP = 0.1
 # hard geometric removal at inference -- NOT recommended, kept for ablation only
 _C.MODEL.EVAL_PURIFY = False
 _C.MODEL.DOMAIN_PROBE_TEXT = 'surveillance camera environment, background'
+# deprecated state-probe texts, kept so old configs still load (unused)
 _C.MODEL.STATE_WALK_PROBE_TEXT = 'a person walking'
 _C.MODEL.STATE_RIDE_PROBE_TEXT = 'a person riding a bicycle'
 

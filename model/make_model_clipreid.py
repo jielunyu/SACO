@@ -104,8 +104,11 @@ class build_transformer(nn.Module):
         self.prompt_learner = PromptLearner(num_classes, dataset_name, clip_model.dtype, clip_model.token_embedding, cfg, clip_model)
         self.text_encoder = TextEncoder(clip_model)
 
-        # Triple semantic addressing (identity / domain / state)
-        self.use_triple = bool(getattr(cfg.MODEL, 'TRIPLE_ADDRESSING', False))
+        # Asymmetric decoupling (identity vs. domain).  TRIPLE_ADDRESSING is a
+        # deprecated alias for older configs.
+        self.use_asym = bool(getattr(cfg.MODEL, 'ASYMMETRIC_DECOUPLING', False) or
+                             getattr(cfg.MODEL, 'TRIPLE_ADDRESSING', False))
+        self.use_triple = self.use_asym
         # hard geometric removal at inference is opt-in and off by default:
         # it removes structural priors along with the domain/state signal
         self.eval_purify = bool(getattr(cfg.MODEL, 'EVAL_PURIFY', False))
@@ -153,38 +156,34 @@ class build_transformer(nn.Module):
         if was_training:
             self.train()
 
-    def _triple_address(self, image_features, image_features_proj, is_riding=None):
-        """Decompose the visual tokens into identity / domain / state parts.
+    def _domain_addressing(self, image_features, image_features_proj):
+        """Address the domain component of the visual tokens.
 
-        Text probes live in CLIP's joint 512-d space, which is exactly the space
-        of ``image_features_proj`` (the projected patch tokens).  Attention is
-        therefore computed between the normalised projected tokens and the
-        normalised probes, and the resulting weights are also used to pool the
-        768-d vision tokens so that all three components live in the same space
-        as the CLS identity feature.
+        The domain probe lives in CLIP's joint 512-d space, which is exactly the
+        space of ``image_features_proj`` (projected patch tokens).  Attention is
+        computed between the normalised projected tokens and the normalised
+        probe, and the same weights pool the 768-d vision tokens so that the
+        domain component lives in the same space as the CLS identity feature.
+
+        The motion state is deliberately *not* addressed here: it is handled by
+        the counterfactual text alignment only.
         """
         patch_proj = image_features_proj[:, 1:, :]
         patch_vis = image_features[:, 1:, :]
 
         patch_proj_n = nn.functional.normalize(patch_proj.float(), dim=-1)
-        p_domain, p_state = self.prompt_learner.get_probes(is_riding)
-
-        comps = []
-        for probe in (p_domain, p_state):
-            probe_n = nn.functional.normalize(probe.float(), dim=-1)          # [1, 512]
-            probe_n = probe_n.expand(patch_proj_n.shape[0], -1).unsqueeze(-1)  # [B, 512, 1]
-            attn = torch.softmax(
-                torch.bmm(patch_proj_n, probe_n).squeeze(-1) / self.probe_temp,
-                dim=1)                                                       # [B, N]
-            attn = attn.to(patch_vis.dtype)
-            v_vis = torch.bmm(attn.unsqueeze(1), patch_vis).squeeze(1)       # [B, 768]
-            v_proj = torch.bmm(attn.unsqueeze(1), patch_proj).squeeze(1)     # [B, 512]
-            comps.append((v_vis, v_proj))
+        probe = self.prompt_learner.get_domain_probe()
+        probe_n = nn.functional.normalize(probe.float(), dim=-1)              # [1, 512]
+        probe_n = probe_n.expand(patch_proj_n.shape[0], -1).unsqueeze(-1)     # [B, 512, 1]
+        attn = torch.softmax(
+            torch.bmm(patch_proj_n, probe_n).squeeze(-1) / self.probe_temp,
+            dim=1)                                                           # [B, N]
+        attn = attn.to(patch_vis.dtype)
+        v_domain = torch.bmm(attn.unsqueeze(1), patch_vis).squeeze(1)        # [B, 768]
+        v_domain_proj = torch.bmm(attn.unsqueeze(1), patch_proj).squeeze(1)  # [B, 512]
 
         v_id = image_features[:, 0]                                          # [B, 768] CLS
-        return (v_id,
-                comps[0][0], comps[1][0],                                    # domain/state, 768-d
-                comps[0][1], comps[1][1])                                    # domain/state, 512-d
+        return v_id, v_domain, v_domain_proj
 
     @staticmethod
     def _remove_component(v, d, eps=1e-6):
@@ -194,7 +193,7 @@ class build_transformer(nn.Module):
         return (v32 - coef * d32).to(v.dtype)
 
     def forward(self, x = None, label=None, get_image = False, get_text = False, cam_label= None, view_label=None,
-                is_counterfactual=False, is_riding=None):
+                is_counterfactual=False):
         if get_text == True:
             return self.encode_text(label, is_counterfactual=is_counterfactual)
 
@@ -246,24 +245,23 @@ class build_transformer(nn.Module):
             else:
                 logits_cf = None
 
-            # Triple addressing: (identity, domain, state) components used by
-            # the orthogonal loss.  Only the ViT token layout is supported.
+            # Asymmetric decoupling: (identity, domain) components used by the
+            # domain orthogonal loss.  Only the ViT token layout is supported.
             orth = None
-            if self.use_triple and self.model_name == 'ViT-B-16':
-                orth = self._triple_address(image_features, image_features_proj, is_riding)
+            if self.use_asym and self.model_name == 'ViT-B-16':
+                orth = self._domain_addressing(image_features, image_features_proj)
 
             return [cls_score, cls_score_proj], [img_feature_last, img_feature, img_feature_proj], img_feature_proj, logits_real, logits_cf, orth
 
         else:
-            if self.use_triple and self.eval_purify and self.model_name == 'ViT-B-16':
-                # Inference-time geometric removal of the domain and state
-                # directions from the retrieval descriptor.
-                _, v_domain, v_state, v_domain_proj, v_state_proj = self._triple_address(
-                    image_features, image_features_proj, is_riding)
+            if self.use_asym and self.eval_purify and self.model_name == 'ViT-B-16':
+                # Optional ablation only: remove the domain direction from the
+                # retrieval descriptor.  Off by default -- it also removes the
+                # structural prior used to localise people.
+                _, v_domain, v_domain_proj = self._domain_addressing(
+                    image_features, image_features_proj)
                 img_feature = self._remove_component(img_feature, v_domain)
-                img_feature = self._remove_component(img_feature, v_state)
                 img_feature_proj = self._remove_component(img_feature_proj, v_domain_proj)
-                img_feature_proj = self._remove_component(img_feature_proj, v_state_proj)
                 feat = self.bottleneck(img_feature)
                 feat_proj = self.bottleneck_proj(img_feature_proj)
 
@@ -399,28 +397,23 @@ class PromptLearner(nn.Module):
         self.register_buffer("state_ride", state_embs['ride'])
 
         # ------------------------------------------------------------------
-        # Fixed semantic probes for triple addressing: one domain probe and two
-        # motion-state probes, encoded once by the frozen CLIP text encoder and
-        # kept as buffers (they are anchors, never optimised).
+        # Asymmetric decoupling: a single fixed *domain* probe.  There is no
+        # state probe -- the motion state is handled by the counterfactual text
+        # alignment only.
         # ------------------------------------------------------------------
-        self.use_triple = bool(cfg is not None and cfg.MODEL.TRIPLE_ADDRESSING)
-        if cfg is not None:
-            probe_texts = (cfg.MODEL.DOMAIN_PROBE_TEXT,
-                           cfg.MODEL.STATE_WALK_PROBE_TEXT,
-                           cfg.MODEL.STATE_RIDE_PROBE_TEXT)
-        else:
-            probe_texts = ('surveillance camera environment, background',
-                           'a person walking',
-                           'a person riding a bicycle')
+        self.use_asym = bool(cfg is not None and
+                             (cfg.MODEL.ASYMMETRIC_DECOUPLING or cfg.MODEL.TRIPLE_ADDRESSING))
+        # backwards-compatible name used elsewhere in the model
+        self.use_triple = self.use_asym
+        domain_text = cfg.MODEL.DOMAIN_PROBE_TEXT if cfg is not None \
+            else 'surveillance camera environment, background'
         if clip_model is not None:
             with torch.no_grad():
-                probes = [clip_model.encode_text(clip.tokenize(t).cuda()).type(dtype).detach().reshape(1, -1)
-                          for t in probe_texts]
+                domain_probe = clip_model.encode_text(
+                    clip.tokenize(domain_text).cuda()).type(dtype).detach().reshape(1, -1)
         else:
-            probes = [torch.zeros(1, ctx_dim, dtype=dtype) for _ in probe_texts]
-        self.register_buffer("domain_probe", probes[0])
-        self.register_buffer("state_walk_probe", probes[1])
-        self.register_buffer("state_ride_probe", probes[2])
+            domain_probe = torch.zeros(1, ctx_dim, dtype=dtype)
+        self.register_buffer("domain_probe", domain_probe)
 
         if use_state:
             # Prompt layout:
@@ -447,20 +440,11 @@ class PromptLearner(nn.Module):
 
         assert self.tokenized_prompts.shape[1] == self.context_length
 
-    def get_probes(self, is_riding=None):
-        """Return the fixed (domain, state) probes for triple addressing.
-
-        ``is_riding=None`` follows the source domain's native state, which is
-        the right choice for single-domain training/inference.  Pass an explicit
-        flag for joint walk/ride batches.
-        """
+    def get_domain_probe(self):
+        """Return the fixed domain probe for asymmetric decoupling."""
         if not hasattr(self, 'domain_probe'):
             raise RuntimeError("PromptLearner was built without probes")
-        if is_riding is None:
-            state = self.state_walk_probe if self.native_state == 'walk' else self.state_ride_probe
-        else:
-            state = self.state_ride_probe if is_riding else self.state_walk_probe
-        return self.domain_probe, state
+        return self.domain_probe
 
     def forward(self, label, is_counterfactual=False):
         cls_ctx = self.cls_ctx[label]
