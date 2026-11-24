@@ -87,9 +87,13 @@ TEST:
   FEAT_NORM: 'yes'
 
 DATASETS:
-  NAMES: 'market1501'
-  ROOT_DIR: '/mnt/sda/yjl/ReID/data'
+#   NAMES: 'market1501'
+#   ROOT_DIR: '/mnt/sda/yjl/ReID/data'
+# OUTPUT_DIR: '/mnt/sda/yjl/ReID/CLIP-ReID/SACO/output2/causal_market_triple'
+
+  NAMES: ('dukemtmc')
+  ROOT_DIR: ('/mnt/sda/yjl/ReID/data/')
 OUTPUT_DIR: '/mnt/sda/yjl/ReID/CLIP-ReID/SACO/output2/causal_market_triple'
 
 # CUDA_VISIBLE_DEVICES=0 python train_clipreid.py --config_file configs/person/vit_clipreid_causal_market_triple.yml
-# CUDA_VISIBLE_DEVICES=0 python test_clipreid.py --config_file configs/person/vit_clipreid_causal_market_triple.yml
+# CUDA_VISIBLE_DEVICES=1 python test_clipreid.py --config_file configs/person/vit_clipreid_causal_market_triple.yml

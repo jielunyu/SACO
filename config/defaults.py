@@ -64,12 +64,13 @@ _C.MODEL.STATE_RIDE_TEXT = 'riding a bicycle'
 # tokens; an orthogonal loss keeps the identity feature away from both, and at
 # inference the same directions are projected out of the retrieval descriptor.
 _C.MODEL.TRIPLE_ADDRESSING = False
-_C.MODEL.ORTH_LOSS_WEIGHT = 1.0
-_C.MODEL.ORTH_MUTUAL_WEIGHT = 0.5
+_C.MODEL.ORTH_LOSS_WEIGHT = 0.5
+# optional domain<->state decoupling term; disabled by default (regulariser only)
+_C.MODEL.ORTH_MUTUAL_WEIGHT = 0.0
 # softmax temperature of the patch-vs-probe attention
 _C.MODEL.PROBE_TEMP = 0.05
-# project the domain/state components out of the features at inference
-_C.MODEL.EVAL_PURIFY = True
+# hard geometric removal at inference -- NOT recommended, kept for ablation only
+_C.MODEL.EVAL_PURIFY = False
 _C.MODEL.DOMAIN_PROBE_TEXT = 'surveillance camera environment, background'
 _C.MODEL.STATE_WALK_PROBE_TEXT = 'a person walking'
 _C.MODEL.STATE_RIDE_PROBE_TEXT = 'a person riding a bicycle'

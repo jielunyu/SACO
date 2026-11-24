@@ -106,7 +106,9 @@ class build_transformer(nn.Module):
 
         # Triple semantic addressing (identity / domain / state)
         self.use_triple = bool(getattr(cfg.MODEL, 'TRIPLE_ADDRESSING', False))
-        self.eval_purify = bool(getattr(cfg.MODEL, 'EVAL_PURIFY', True))
+        # hard geometric removal at inference is opt-in and off by default:
+        # it removes structural priors along with the domain/state signal
+        self.eval_purify = bool(getattr(cfg.MODEL, 'EVAL_PURIFY', False))
         self.probe_temp = float(getattr(cfg.MODEL, 'PROBE_TEMP', 0.05))
 
         # Frozen text anchors used by the Stage-2 image-text alignment.

@@ -1,0 +1,96 @@
+MODEL:
+  PRETRAIN_CHOICE: 'imagenet'
+  METRIC_LOSS_TYPE: 'triplet'
+  IF_LABELSMOOTH: 'on'
+  IF_WITH_CENTER: 'no'
+  NAME: 'ViT-B-16'
+  STRIDE_SIZE: [16, 16]
+  ID_LOSS_WEIGHT : 0.25
+  TRIPLET_LOSS_WEIGHT : 1.0
+  I2T_LOSS_WEIGHT : 1.0
+  # ------------------------------------------------------------------
+  # Causal state intervention (Stage 2)
+  # ------------------------------------------------------------------
+  CAUSAL_STATE: True          # inject fixed walk/ride state tokens + CF loss
+  NATIVE_STATE: 'walk'        # Market1501 is a walking dataset
+  I2T_CF_LOSS_WEIGHT: 1.0     # lambda_cf
+  STATE_WALK_TEXT: 'walking on foot'      # 3 CLIP tokens
+  STATE_RIDE_TEXT: 'riding a bicycle'     # 3 CLIP tokens
+  # ------------------------------------------------------------------
+  # Triple semantic addressing -- SOFT variant
+  # Decoupling is enforced by gradients only (soft orthogonal loss); the
+  # retrieval descriptor is NOT geometrically altered at inference, so the
+  # structural prior used to localise people is preserved.
+  # ------------------------------------------------------------------
+  TRIPLE_ADDRESSING: True
+  ORTH_LOSS_WEIGHT: 0.5       # lambda_orth (regulariser, not the dominant term)
+  ORTH_MUTUAL_WEIGHT: 0.0     # domain<->state decoupling term disabled
+  PROBE_TEMP: 0.05
+  EVAL_PURIFY: False          # no hard removal at inference
+  DOMAIN_PROBE_TEXT: 'surveillance camera environment, background'
+  STATE_WALK_PROBE_TEXT: 'a person walking'
+  STATE_RIDE_PROBE_TEXT: 'a person riding a bicycle'
+
+INPUT:
+  SIZE_TRAIN: [256, 128]
+  SIZE_TEST: [256, 128]
+  PROB: 0.5 # random horizontal flip
+  RE_PROB: 0.5 # random erasing
+  PADDING: 10
+  PIXEL_MEAN: [0.5, 0.5, 0.5]
+  PIXEL_STD: [0.5, 0.5, 0.5]
+
+DATALOADER:
+  SAMPLER: 'softmax_triplet'
+  NUM_INSTANCE: 4
+  NUM_WORKERS: 8
+
+SOLVER:
+  STAGE1:
+    IMS_PER_BATCH: 64
+    OPTIMIZER_NAME: "Adam"
+    BASE_LR: 0.00035
+    WARMUP_LR_INIT: 0.00001
+    LR_MIN: 1e-6
+    WARMUP_METHOD: 'linear'
+    WEIGHT_DECAY:  1e-4
+    WEIGHT_DECAY_BIAS: 1e-4
+    MAX_EPOCHS: 120
+    CHECKPOINT_PERIOD: 60
+    LOG_PERIOD: 50
+    WARMUP_EPOCHS: 5
+
+  STAGE2:
+    IMS_PER_BATCH: 64
+    OPTIMIZER_NAME: "Adam"
+    BASE_LR: 0.000005
+    WARMUP_METHOD: 'linear'
+    WARMUP_ITERS: 10
+    WARMUP_FACTOR: 0.1
+    WEIGHT_DECAY:  0.0001
+    WEIGHT_DECAY_BIAS: 0.0001
+    LARGE_FC_LR: False
+    MAX_EPOCHS: 60
+    CHECKPOINT_PERIOD: 5
+    LOG_PERIOD: 50
+    EVAL_PERIOD: 10
+    BIAS_LR_FACTOR: 2
+
+    STEPS: [30, 50]
+    GAMMA: 0.1
+
+TEST:
+  EVAL: True
+  IMS_PER_BATCH: 64
+  RE_RANKING: False
+  WEIGHT: '/mnt/sda/yjl/ReID/CLIP-ReID/SACO/output2/causal_market_triple_soft/ViT-B-16_60.pth'
+  NECK_FEAT: 'before'
+  FEAT_NORM: 'yes'
+
+DATASETS:
+  NAMES: 'market1501'
+  ROOT_DIR: '/mnt/sda/yjl/ReID/data'
+OUTPUT_DIR: '/mnt/sda/yjl/ReID/CLIP-ReID/SACO/output2/causal_market_triple_soft'
+
+# CUDA_VISIBLE_DEVICES=0 python train_clipreid.py --config_file configs/person/vit_clipreid_causal_market_triple_soft.yml
+# CUDA_VISIBLE_DEVICES=0 python test_clipreid.py --config_file configs/person/vit_clipreid_causal_market_triple_soft.yml
